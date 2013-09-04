@@ -19,12 +19,11 @@ module BloggerFeedPusher
       :tags => %w[br p div img a],
     }
 
-    attr_reader :content, :images
+    attr_reader :content, :images, :tags
     attr_accessor :logger
 
     def initialize(feed_entry)
       @feed_entry = feed_entry
-      @tags = feed_entry.categories
     end
 
     def fetch
@@ -36,10 +35,9 @@ module BloggerFeedPusher
 
       @content = result.content
       #@images = result.images
-    end
 
-    def tags
-      @tags
+      tagger = BloggerFeedPusher::Tagger.new
+      @tags = @feed_entry.categories + tagger.find_tags(content)
     end
 
     def title
@@ -69,28 +67,56 @@ module BloggerFeedPusher
 
   class Tagger
     def initialize
+      index_tags
+      @min_tag_size = tags.map(&:size).min
     end
 
     def tags
-      %w[Путин Сирия экономика].
-        map(&:mb_chars).map(&:downcase).map(&:to_s).uniq
+      %w[Путин Сирия экономика Обама США Россия ООН ССА Навальный война промышленность завод спорт футбол чемпионат геополитика история Ливия Иран Ирак] + 
+      ["Мировая экономика"]
     end
 
     def find_tags(text)
+      text_downcase = text.mb_chars.downcase.to_s
       found_tags = []
 
-      # Search for whole tag in text
-      found_tags << tags.reject { |t| text.index(t).nil? }
-
-      min_tag_size = 5
-
-      puts text.split.
+      words = text_downcase.split.
         map { |w| w.gsub(/[,.?!=:"']+$/, "") }.
-        reject { |w| w.size < min_tag_size }. # ignore small words
-        map(&:mb_chars).map(&:downcase).map(&:to_s).
-        uniq
+        reject { |w| w.size < @min_tag_size }. # ignore small words
+        map(&:mb_chars).map(&:downcase).map(&:to_s)
 
-      found_tags.flatten
+      # Search for whole tag in text
+      found_tags << @tag_index[:downcase].values_at(*@tag_index[:downcase].keys.reject { |t| text_downcase.index(" #{t} ").nil? }.uniq)
+
+      # Search for normalized tag in text
+      text_normalized = normalize_text(text)
+
+      found_tags << @tag_index[:normalized].values_at(*@tag_index[:normalized].keys.reject { |t| text_normalized.index(" #{t} ").nil? }.uniq)
+
+      found_tags.flatten.uniq.compact
+    end
+
+    private
+
+    def index_tags
+      @tag_index = {}
+
+      @tag_index[:downcase] = {}
+      tags.each do |tag|
+        @tag_index[:downcase][tag.mb_chars.downcase.to_s] = tag
+      end
+
+      @tag_index[:normalized] = {}
+      tags.each do |tag|
+        @tag_index[:normalized][normalize_text(tag)] = tag
+      end
+    end
+
+    def normalize_text(text)
+      # удаляем окончание
+      text.mb_chars.downcase.to_s.
+        split.
+        map{ |w| w.gsub(/([уеыаоэяию]+)$/, "") }.join(" ")
     end
   end
 
@@ -138,9 +164,6 @@ module BloggerFeedPusher
   end
 end
 
-#reactor = BloggerFeedPusher::Reactor.new
-#reactor.run
+reactor = BloggerFeedPusher::Reactor.new
+reactor.run
 
-tagger = BloggerFeedPusher::Tagger.new
-
-puts tagger.find_tags("Путин решил профинансировать атомную энергетику в Сирии. В небо Сирии поднимуться наши Су-27")
